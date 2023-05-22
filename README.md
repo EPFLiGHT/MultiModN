@@ -48,3 +48,10 @@ The user should be able to choose to keep missing values (nan values). Missing v
 * Init, train and test the MoMoNet model
 * Store the trained model, training history and save learning curves
 
+## Quick start
+Quick start running MoMoNet on Titanic example pipeline with a multilayer perceptron encoder:
+```
+./datasets/titanic/get_data.sh
+python3 pipelines/titanic/titanic_mlp_pipeline.py
+```
+Open `pipelines/titanic/titanic_mlp.png` to look at the training curves.
