@@ -12,7 +12,7 @@ from typing import List, Optional, Iterable, Tuple, Callable, Union
 import torch.nn as nn
 import numpy as np
 from torchsummary import summary
-
+from torchmetrics import ConfusionMatrix
 
 class MoMoNet(nn.Module):
     def __init__(
@@ -59,6 +59,13 @@ class MoMoNet(nn.Module):
         state_change_epoch = np.zeros(len(self.encoders))
         n_correct_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
 
+        tp_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        tn_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        fp_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        fn_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+
+        confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+
         for batch_idx, batch in enumerate(train_loader):
             data, target, encoder_sequence = (list(batch) + [None])[:3]
 
@@ -67,6 +74,11 @@ class MoMoNet(nn.Module):
 
             err_loss = torch.zeros((len(self.encoders) + 1, len(self.decoders)))
             state_change = torch.zeros(len(self.encoders))
+
+            tp = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
+            tn = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
+            fp = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
+            fn = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
 
             data_encoders = [data_encoder.to(self.device) for data_encoder in data]
             target = target.to(self.device)
@@ -82,6 +94,12 @@ class MoMoNet(nn.Module):
 
                 err_loss[0][dec_idx] = criterion(output_decoder, target_decoder)
                 n_correct_epoch[0][dec_idx] += sum(prediction == target_decoder).float()
+
+                cm = confmat(prediction, target_decoder)
+                tp[0][dec_idx] += cm[1][1] # Not cm[0][0], because in torch it is reversed on diagonal
+                fp[0][dec_idx] += cm[0][1]
+                fn[0][dec_idx] += cm[1][0]
+                tn[0][dec_idx] += cm[0][0] # Not cm[1][1], -//-
 
             for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
                                                                shuffle_mode=self.shuffle_mode,
@@ -110,6 +128,12 @@ class MoMoNet(nn.Module):
                     n_correct_epoch[enc_idx + 1][dec_idx] += sum(
                         prediction == target_decoder)
 
+                    cm = confmat(prediction, target_decoder)
+                    tp[enc_idx + 1][dec_idx] += cm[1][1]
+                    fp[enc_idx + 1][dec_idx] += cm[0][1]
+                    fn[enc_idx + 1][dec_idx] += cm[1][0]
+                    tn[enc_idx + 1][dec_idx] += cm[0][0]
+
             # Global losses (combining all encoders and decoders) at batch level
             global_err_loss = torch.sum(err_loss) / (
                     len(self.decoders) * (len(self.encoders) + 1))
@@ -126,6 +150,12 @@ class MoMoNet(nn.Module):
             err_loss_epoch += err_loss.detach().numpy()
             state_change_epoch += state_change.detach().numpy()
 
+            # Move to cpu and convert to numpy
+            tp_epoch += tp.cpu().detach().numpy()
+            fp_epoch += fp.cpu().detach().numpy()
+            fn_epoch += fn.cpu().detach().numpy()
+            tn_epoch += tn.cpu().detach().numpy()
+
             if log_interval and batch_idx % log_interval == log_interval - 1:
                 logger(
                     f"Batch {batch_idx + 1}/{n_batches}\n"
@@ -138,10 +168,29 @@ class MoMoNet(nn.Module):
         state_change_epoch /= n_batches
         accuracy_epoch = n_correct_epoch / n_samples_epoch
 
+        # Compute metrics for the current epoch
+        # Use np.where to avoid NaNs, set the whole metric to zero
+        # in case of the equality of denominator to zero
+
+        #Note, that here we compute metrics for all encoders and decoders, \
+        # and at the history file select the last encoder for the final metric
+        sensitivity_denominator = tp_epoch + fn_epoch
+        sensitivity_epoch = np.where(sensitivity_denominator == 0, 0,
+                                     tp_epoch / sensitivity_denominator)
+
+        specificity_denominator = tn_epoch + fp_epoch
+        specificity_epoch = np.where(specificity_denominator == 0, 0,
+                                     tn_epoch / specificity_denominator)
+
+        balanced_accuracy_epoch = (sensitivity_epoch + specificity_epoch) / 2
+
         if history is not None:
             history.state_change_loss.append(state_change_epoch)
             history.loss['train'].append(err_loss_epoch)
             history.accuracy['train'].append(accuracy_epoch)
+            history.sensitivity['train'].append(sensitivity_epoch)
+            history.specificity['train'].append(specificity_epoch)
+            history.balanced_accuracy['train'].append(balanced_accuracy_epoch)
 
     def test(
             self,
@@ -163,6 +212,13 @@ class MoMoNet(nn.Module):
         err_loss_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
         n_correct_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
 
+        tp_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        tn_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        fp_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        fn_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+
+        confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+
         with torch.no_grad():
             for batch in test_loader:
                 data, target, encoder_sequence = (list(batch) + [None])[:3]
@@ -171,6 +227,11 @@ class MoMoNet(nn.Module):
                 n_samples_prediction[0] += batch_size
 
                 err_loss = torch.zeros((len(self.encoders) + 1, len(self.decoders)))
+
+                tp = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+                tn = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+                fp = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+                fn = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
 
                 data_encoders = [data_encoder.to(self.device) for data_encoder in data]
                 target = target.to(self.device)
@@ -185,6 +246,12 @@ class MoMoNet(nn.Module):
                     err_loss[0][dec_idx] = criterion(output_decoder, target_decoder)
                     n_correct_prediction[0][dec_idx] += sum(
                         prediction == target_decoder).float()
+
+                    cm = confmat(prediction, target_decoder)
+                    tp[0][dec_idx] += cm[1][1]
+                    fp[0][dec_idx] += cm[0][1]
+                    fn[0][dec_idx] += cm[1][0]
+                    tn[0][dec_idx] += cm[0][0]
 
                 for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
                                                                    shuffle_mode=self.shuffle_mode,
@@ -210,16 +277,40 @@ class MoMoNet(nn.Module):
                         n_correct_prediction[enc_idx + 1][dec_idx] += sum(
                             prediction == target_decoder)
 
+                        cm = confmat(prediction, target_decoder)
+                        tp[enc_idx + 1][dec_idx] += cm[1][1]
+                        fp[enc_idx + 1][dec_idx] += cm[0][1]
+                        fn[enc_idx + 1][dec_idx] += cm[1][0]
+                        tn[enc_idx + 1][dec_idx] += cm[0][0]
+
                 err_loss_prediction += err_loss.detach().numpy()
+
+                tp_prediction += tp.cpu().detach().numpy()
+                fp_prediction += fp.cpu().detach().numpy()
+                fn_prediction += fn.cpu().detach().numpy()
+                tn_prediction += tn.cpu().detach().numpy()
 
         err_loss_prediction /= n_batches
         accuracy_prediction = n_correct_prediction / n_samples_prediction
+
+        sensitivity_denominator = tp_prediction + fn_prediction
+        sensitivity_prediction = np.where(sensitivity_denominator == 0, 0,
+                                          tp_prediction / sensitivity_denominator)
+
+        specificity_denominator = tn_prediction + fp_prediction
+        specificity_prediction = np.where(specificity_denominator == 0, 0,
+                                          tn_prediction / specificity_denominator)
+
+        balanced_accuracy_prediction = (sensitivity_prediction + specificity_prediction) / 2
 
         if log_results:
             logger(
                 f"{tag.capitalize()} results\n"
                 f"\tAverage loss: {np.mean(err_loss_prediction):.4f}\n"
-                f"\tAccuracy: {np.mean(accuracy_prediction):.4f}"
+                f"\tAccuracy: {np.mean(accuracy_prediction):.4f}\n"
+                f"\tSensitivity: {sensitivity_prediction:.4f}\n"
+                f"\tSpecificity: {specificity_prediction:.4f}\n"
+                f"\tBalanced accuracy: {balanced_accuracy_prediction:.4f}"
             )
 
         if history is not None:
@@ -231,20 +322,31 @@ class MoMoNet(nn.Module):
                 history.accuracy[tag] = []
             history.accuracy[tag].append(accuracy_prediction)
 
+            if tag not in history.sensitivity:
+                history.sensitivity[tag] = []
+            history.sensitivity[tag].append(sensitivity_prediction)
+
+            if tag not in history.specificity:
+                history.specificity[tag] = []
+            history.specificity[tag].append(specificity_prediction)
+
+            if tag not in history.balanced_accuracy:
+                history.balanced_accuracy[tag] = []
+            history.balanced_accuracy[tag].append(balanced_accuracy_prediction)
+
+
     def predict(
             self,
             x: List[Tensor],
             encoder_sequence: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         self.eval()
-
         n_samples = x[0].shape[0]
         full_predictions = np.zeros(
             (len(self.encoders) + 1, len(self.decoders), n_samples))
 
         with torch.no_grad():
             x_encoders = [x_encoder.to(self.device) for x_encoder in x]
-
             state: Tensor = self.init_state(n_samples)
 
             for dec_idx, decoder in enumerate(self.decoders):
@@ -253,11 +355,13 @@ class MoMoNet(nn.Module):
 
                 full_predictions[0][dec_idx] = prediction.detach().numpy()
 
+                # To predict probabilities instead of final class
+                #full_predictions[0][dec_idx] = output_decoder[..., -1].item()
+
             for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
                                                                shuffle_mode=self.shuffle_mode,
                                                                train=False):
                 encoder = self.encoders[enc_idx]
-
                 state = encoder(state, x_encoders[data_idx])
 
                 for dec_idx, decoder in enumerate(self.decoders):
@@ -265,6 +369,7 @@ class MoMoNet(nn.Module):
                     _, prediction = torch.max(output_decoder, dim=1)
 
                     full_predictions[enc_idx + 1][dec_idx] = prediction.detach().numpy()
+                    # full_predictions[enc_idx + 1][dec_idx] = output_decoder[..., -1].item()
 
         return full_predictions
 
@@ -328,7 +433,6 @@ class MoMoNet(nn.Module):
         else:
             encoder_iterable_batch = encoder_sequence.numpy().copy()
             encoder_iterable = encoder_iterable_batch[0]
-
             if not (encoder_iterable_batch == encoder_iterable).all():
                 raise ValueError(
                     "Encoder sequence has different values across the batch. Hint: set batch size to 1 to avoid this error."
