@@ -37,4 +37,14 @@ tuple
 namely a tuple containing an array of tensors representing the features for each subsequent encoder, a numpy array representing the different targets and optionally a numpy array giving the order in which to apply the encoders to the subsequent data tensors. Note: `data` and `encoding_sequence` must have the same length.
 
 #### **Missing values**
-The user should be able to choose to keep missing values (nan values). Missing values can be present in the tensors yielded by the dataset and are managed by MoMoNet. 
+The user should be able to choose to keep missing values (nan values). Missing values can be present in the tensors yielded by the dataset and are managed by MoMoNet.
+
+### Pipelines
+```/pipeline``` package contains the training pipelines using MoMoNet for Multi-Modal Learning. It follows the following steps:
+
+* Create `MoMoDataset` and the `dataloader` associated
+* Create the list of encoders according to the features shape of the MoMoDataset
+* Create the list of decoders according to the targets of the MoMoDataset
+* Init, train and test the MoMoNet model
+* Store the trained model, training history and save learning curves
+
