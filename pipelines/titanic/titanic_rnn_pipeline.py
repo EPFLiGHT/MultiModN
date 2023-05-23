@@ -7,11 +7,11 @@ from tqdm.auto import trange
 import torch
 from torch.utils.data import DataLoader
 from torch.nn import CrossEntropyLoss
-from momonet.momonet import MoMoNet
-from momonet.encoders import RNNEncoder
-from momonet.decoders import LogisticDecoder
+from multimodn.multimodn import MultiModN
+from multimodn.encoders import RNNEncoder
+from multimodn.decoders import LogisticDecoder
 from datasets.titanic import TitanicDataset
-from momonet.history import MoMoNetHistory
+from multimodn.history import MultiModNHistory
 from pipelines import utils
 import torch.nn.functional as F
 import pickle as pkl
@@ -69,13 +69,13 @@ def main():
     encoders = [RNNEncoder(state_size, len(features), (5, 5), F.relu)]
     decoders = [LogisticDecoder(state_size) for _ in targets]
 
-    model = MoMoNet(state_size, encoders, decoders, 0.7, 0.3)
+    model = MultiModN(state_size, encoders, decoders, 0.7, 0.3)
 
     optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
 
     criterion = CrossEntropyLoss()
 
-    history = MoMoNetHistory(targets)
+    history = MultiModNHistory(targets)
 
     ##############################################################################
     ###### Train and Test model

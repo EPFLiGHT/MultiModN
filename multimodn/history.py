@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-class MoMoNetHistory():
-    """Training history of MoMoNet"""
+class MultiModNHistory():
+    """Training history of MultiModN"""
 
     def __init__(
         self,
@@ -49,7 +49,7 @@ class MoMoNetHistory():
         for i, target_name in enumerate(targets_to_display):
             if target_name not in self.decoder_names:
                 raise ValueError(
-                    f"Target name '{target_name}' is not part of the MoMoNet history"
+                    f"Target name '{target_name}' is not part of the MultiModN history"
                 )
 
             # Plot loss curves

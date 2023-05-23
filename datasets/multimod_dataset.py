@@ -7,7 +7,7 @@ from torch._utils import _accumulate as accumulate
 import numpy as np
 
 
-class MoMoDataset(Dataset, ABC):
+class MultiModDataset(Dataset, ABC):
     @abstractmethod
     def __len__(self) -> int:
         pass
@@ -52,8 +52,8 @@ class MoMoDataset(Dataset, ABC):
         return [Subset(self, indices) for indices in splitted_indices]
 
 
-class PartitionDataset(MoMoDataset):
-    """Tabular dataset for MoMoNet initiable with X and y np arrays"""
+class PartitionDataset(MultiModDataset):
+    """Tabular dataset for MultiModN initiable with X and y np arrays"""
 
     def __init__(self, X: np.ndarray, y: np.ndarray,
                  partitions: Optional[List[int]] = None):
@@ -95,7 +95,7 @@ class FeatureWiseDataset(PartitionDataset):
         super().__init__(X, y, [1] * n_features)
 
 
-class JointDatasets(MoMoDataset):
+class JointDatasets(MultiModDataset):
     def __init__(self, datasets: List[Dataset]):
         assert all(len(dataset) == len(datasets[0]) for dataset in
                    datasets), "Datasets must have the same length"

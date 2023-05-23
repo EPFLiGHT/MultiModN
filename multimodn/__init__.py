@@ -1,3 +1,3 @@
 from .history import *
-from .momonet import *
+from .multimodn import *
 from .state import *

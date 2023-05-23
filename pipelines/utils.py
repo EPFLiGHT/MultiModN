@@ -4,12 +4,12 @@ from pathlib import Path
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Pipeline for MoMoNet')
+    parser = argparse.ArgumentParser(description='Pipeline for MultiModN')
 
     parser.add_argument(
         '-e', '--epoch',
         dest='epoch',
-        help='Number of epochs for MoMoNet training',
+        help='Number of epochs for MultiModN training',
         required=False,
         type=int,
     )

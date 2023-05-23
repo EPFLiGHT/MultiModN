@@ -3,10 +3,10 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Callable, Tuple, Optional
-from momonet.encoders import MoMoEncoder
+from multimodn.encoders import MultiModEncoder
 
 
-class MLPEncoder(MoMoEncoder):
+class MLPEncoder(MultiModEncoder):
     """Multi-layer perceptron encoder"""
 
     def __init__(

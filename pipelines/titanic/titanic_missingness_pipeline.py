@@ -7,10 +7,10 @@ from tqdm.auto import trange
 import torch
 from torch.utils.data import DataLoader
 from torch.nn import CrossEntropyLoss
-from momonet.momonet import MoMoNet
-from momonet.encoders import MLPFeatureEncoder
-from momonet.decoders import LogisticDecoder
-from momonet.history import MoMoNetHistory
+from multimodn.multimodn import MultiModN
+from multimodn.encoders import MLPFeatureEncoder
+from multimodn.decoders import LogisticDecoder
+from multimodn.history import MultiModNHistory
 from datasets.titanic import TitanicDataset
 from pipelines import utils
 import torch.nn.functional as F
@@ -71,13 +71,13 @@ def main():
     encoders = [MLPFeatureEncoder(state_size, 5, F.relu) for _ in features]
     decoders = [LogisticDecoder(state_size) for _ in targets]
 
-    model = MoMoNet(state_size, encoders, decoders, 0.7, 0.3)
+    model = MultiModN(state_size, encoders, decoders, 0.7, 0.3)
 
     optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
 
     criterion = CrossEntropyLoss()
 
-    history = MoMoNetHistory(targets)
+    history = MultiModNHistory(targets)
 
     ##############################################################################
     ###### Train and Test model

@@ -1,13 +1,13 @@
 import torch
 
-from momonet.decoders.momo_decoder import MoMoDecoder
+from multimodn.decoders.multimod_decoder import MultiModDecoder
 from torch import Tensor, sigmoid
 from typing import Callable, Optional
 import torch.nn as nn
 
 
-class ClassDecoder(MoMoDecoder):
-    """Classifier for MoMoNet"""
+class ClassDecoder(MultiModDecoder):
+    """Classifier for MultiModN"""
 
     def __init__(self, state_size: int, n_classes: int, activation: Callable,
                  device: Optional[torch.device] = None):
@@ -21,7 +21,7 @@ class ClassDecoder(MoMoDecoder):
 
 
 class LogisticDecoder(ClassDecoder):
-    """Logistic decoder for MoMoNet"""
+    """Logistic decoder for MultiModN"""
 
     def __init__(self, state_size: int, device: Optional[torch.device] = None):
         super().__init__(state_size, 2, sigmoid, device)

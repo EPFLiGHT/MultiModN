@@ -4,29 +4,29 @@ from torch.optim import Optimizer
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from momonet.encoders.momo_encoder import MoMoEncoder
-from momonet.decoders.momo_decoder import MoMoDecoder
-from momonet.state import InitState, TrainableInitState
-from momonet.history import MoMoNetHistory
+from multimodn.encoders.multimod_encoder import MultiModEncoder
+from multimodn.decoders.multimod_decoder import MultiModDecoder
+from multimodn.state import InitState, TrainableInitState
+from multimodn.history import MultiModNHistory
 from typing import List, Optional, Iterable, Tuple, Callable, Union
 import torch.nn as nn
 import numpy as np
 from torchsummary import summary
 from torchmetrics import ConfusionMatrix
 
-class MoMoNet(nn.Module):
+class MultiModN(nn.Module):
     def __init__(
             self,
             state_size: int,
-            encoders: List[MoMoEncoder],
-            decoders: List[MoMoDecoder],
+            encoders: List[MultiModEncoder],
+            decoders: List[MultiModDecoder],
             err_penalty: float,
             state_change_penalty: float,
             shuffle_mode: Optional[bool] = False,
             init_state: Optional[InitState] = None,
             device: Optional[torch.device] = None,
     ):
-        super(MoMoNet, self).__init__()
+        super(MultiModN, self).__init__()
         self.shuffle_mode = shuffle_mode
         self.device = device if device else torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
@@ -43,7 +43,7 @@ class MoMoNet(nn.Module):
             train_loader: DataLoader,
             optimizer: Optimizer,
             criterion: Union[nn.Module, Callable],
-            history: Optional[MoMoNetHistory] = None,
+            history: Optional[MultiModNHistory] = None,
             log_interval: Optional[int] = None,
             logger: Optional[Callable] = None,
     ) -> None:
@@ -196,7 +196,7 @@ class MoMoNet(nn.Module):
             self,
             test_loader: DataLoader,
             criterion: Union[nn.Module, Callable],
-            history: Optional[MoMoNetHistory] = None,
+            history: Optional[MultiModNHistory] = None,
             tag: str = 'test',
             log_results: bool = False,
             logger: Optional[Callable] = None,

@@ -1,4 +1,4 @@
-from momonet.encoders import MLPEncoder
+from multimodn.encoders import MLPEncoder
 from typing import Callable
 from torch import sigmoid
 

@@ -5,11 +5,11 @@ from torch import Tensor
 import torch.nn as nn
 
 
-class MoMoEncoder(nn.Module, ABC):
-    """Abstract encoder for MoMoNet"""
+class MultiModEncoder(nn.Module, ABC):
+    """Abstract encoder for MultiModN"""
 
     def __init__(self, state_size: int):
-        super(MoMoEncoder, self).__init__()
+        super(MultiModEncoder, self).__init__()
         self.state_size = state_size
 
     @abstractmethod

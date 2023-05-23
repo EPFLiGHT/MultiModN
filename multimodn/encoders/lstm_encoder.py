@@ -3,10 +3,10 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Callable, Tuple
-from momonet.encoders import MoMoEncoder
+from multimodn.encoders import MultiModEncoder
 
-class RNNEncoder(MoMoEncoder):
-    """RNN encoder"""
+class LSTMEncoder(MultiModEncoder):
+    """LSTM encoder"""
 
     def __init__(
         self,
@@ -25,20 +25,20 @@ class RNNEncoder(MoMoEncoder):
         for i, (inDim, outDim) in enumerate(zip(dim_layers, dim_layers[1:])):
             # The state is concatenated to the input of the last layer
             if i == len(dim_layers)-2:
-                self.layers.append(nn.RNN(inDim + self.state_size, outDim, batch_first=True))
+                self.layers.append(nn.LSTM(inDim + self.state_size, outDim, batch_first=True))
             else:
-                self.layers.append(nn.RNN(inDim, outDim, batch_first=True))
+                self.layers.append(nn.LSTM(inDim, outDim, batch_first=True))
 
     def forward(self, state: Tensor, x: Tensor) -> Tensor:
         for layer in self.layers[:-1]:
-            out, h_n = layer(x)
+            out, tups = layer(x)
             x = self.activation(out)
 
-        output, h_n = self.layers[-1](torch.cat([x, state], dim=1))
+        output, tups = self.layers[-1](torch.cat([x, state], dim=1))
 
         return output
 
-class RNNFeatureEncoder(RNNEncoder):
+class LSTMFeatureEncoder(LSTMEncoder):
     """Feature encoder"""
 
     def __init__(
