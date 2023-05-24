@@ -12,7 +12,22 @@ from typing import List, Optional, Iterable, Tuple, Callable, Union
 import torch.nn as nn
 import numpy as np
 from torchsummary import summary
+
 from torchmetrics import ConfusionMatrix
+
+def compute_metrics(tp, tn, fp, fn, cm, enc_idx, dec_idx):
+    if cm is not None:
+        # In torch cm fp are in rows, fn are in columns
+        # According to https://torchmetrics.readthedocs.io/en/stable/classification/confusion_matrix.html
+        tp[enc_idx][dec_idx] += cm[1][1]
+        tn[enc_idx][dec_idx] += cm[0][0]
+        fp[enc_idx][dec_idx] += cm[0][1]
+        fn[enc_idx][dec_idx] += cm[1][0]
+    else:
+        tp[enc_idx][dec_idx] = float('nan')
+        tn[enc_idx][dec_idx] = float('nan')
+        fp[enc_idx][dec_idx] = float('nan')
+        fn[enc_idx][dec_idx] = float('nan')
 
 class MultiModN(nn.Module):
     def __init__(
@@ -28,6 +43,8 @@ class MultiModN(nn.Module):
     ):
         super(MultiModN, self).__init__()
         self.shuffle_mode = shuffle_mode
+
+
         self.device = device if device else torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
         self.init_state = TrainableInitState(
@@ -59,14 +76,14 @@ class MultiModN(nn.Module):
         state_change_epoch = np.zeros(len(self.encoders))
         n_correct_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
 
-        tp_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        tn_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        fp_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        fn_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-
-        confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+        # For computation of sensitivity, specificity and balanced accuracy
+        tp_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+        tn_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+        fp_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+        fn_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
 
         for batch_idx, batch in enumerate(train_loader):
+            # Note: for multiclass target should be = [0, n_classes -1] for the correctness of CrossEntropyLoss
             data, target, encoder_sequence = (list(batch) + [None])[:3]
 
             batch_size = target.shape[0]
@@ -75,6 +92,7 @@ class MultiModN(nn.Module):
             err_loss = torch.zeros((len(self.encoders) + 1, len(self.decoders)))
             state_change = torch.zeros(len(self.encoders))
 
+            # Collect metrics from each step
             tp = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
             tn = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
             fp = torch.zeros((len(self.encoders)+1, len(self.decoders))).to(self.device)
@@ -95,11 +113,15 @@ class MultiModN(nn.Module):
                 err_loss[0][dec_idx] = criterion(output_decoder, target_decoder)
                 n_correct_epoch[0][dec_idx] += sum(prediction == target_decoder).float()
 
-                cm = confmat(prediction, target_decoder)
-                tp[0][dec_idx] += cm[1][1] # Not cm[0][0], because in torch it is reversed on diagonal
-                fp[0][dec_idx] += cm[0][1]
-                fn[0][dec_idx] += cm[1][0]
-                tn[0][dec_idx] += cm[0][0] # Not cm[1][1], -//-
+                # Each decoder can possibly solve different task, so we redefine confusion matrices for each decoder,
+                # and store them in list for the next encoding steps
+                # Now, for simplicity we only calculate confusion matrix for deocders with binary tasks
+                cm = None
+                if decoder.n_classes == 2:
+                    confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+                    cm = confmat(prediction, target_decoder)
+
+                compute_metrics(tp, tn, fp, fn, cm, 0, dec_idx)
 
             for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
                                                                shuffle_mode=self.shuffle_mode,
@@ -128,11 +150,12 @@ class MultiModN(nn.Module):
                     n_correct_epoch[enc_idx + 1][dec_idx] += sum(
                         prediction == target_decoder)
 
-                    cm = confmat(prediction, target_decoder)
-                    tp[enc_idx + 1][dec_idx] += cm[1][1]
-                    fp[enc_idx + 1][dec_idx] += cm[0][1]
-                    fn[enc_idx + 1][dec_idx] += cm[1][0]
-                    tn[enc_idx + 1][dec_idx] += cm[0][0]
+                    cm = None
+                    if decoder.n_classes == 2:
+                        confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+                        cm = confmat(prediction, target_decoder)
+
+                    compute_metrics(tp, tn, fp, fn, cm, enc_idx+1, dec_idx)
 
             # Global losses (combining all encoders and decoders) at batch level
             global_err_loss = torch.sum(err_loss) / (
@@ -150,11 +173,10 @@ class MultiModN(nn.Module):
             err_loss_epoch += err_loss.detach().numpy()
             state_change_epoch += state_change.detach().numpy()
 
-            # Move to cpu and convert to numpy
-            tp_epoch += tp.cpu().detach().numpy()
-            fp_epoch += fp.cpu().detach().numpy()
-            fn_epoch += fn.cpu().detach().numpy()
-            tn_epoch += tn.cpu().detach().numpy()
+            tp_epoch += tp
+            fp_epoch += fp
+            fn_epoch += fn
+            tn_epoch += tn
 
             if log_interval and batch_idx % log_interval == log_interval - 1:
                 logger(
@@ -171,16 +193,18 @@ class MultiModN(nn.Module):
         # Compute metrics for the current epoch
         # Use np.where to avoid NaNs, set the whole metric to zero
         # in case of the equality of denominator to zero
+        # At the end move all metrics to cpu and convert to numpy for history
 
         #Note, that here we compute metrics for all encoders and decoders, \
         # and at the history file select the last encoder for the final metric
+
         sensitivity_denominator = tp_epoch + fn_epoch
-        sensitivity_epoch = np.where(sensitivity_denominator == 0, 0,
-                                     tp_epoch / sensitivity_denominator)
+        sensitivity_epoch = torch.where(sensitivity_denominator == 0, 0,
+                                     tp_epoch / sensitivity_denominator).detach().cpu().numpy()
 
         specificity_denominator = tn_epoch + fp_epoch
-        specificity_epoch = np.where(specificity_denominator == 0, 0,
-                                     tn_epoch / specificity_denominator)
+        specificity_epoch = torch.where(specificity_denominator == 0, 0,
+                                     tn_epoch / specificity_denominator).detach().cpu().numpy()
 
         balanced_accuracy_epoch = (sensitivity_epoch + specificity_epoch) / 2
 
@@ -191,6 +215,7 @@ class MultiModN(nn.Module):
             history.sensitivity['train'].append(sensitivity_epoch)
             history.specificity['train'].append(specificity_epoch)
             history.balanced_accuracy['train'].append(balanced_accuracy_epoch)
+
 
     def test(
             self,
@@ -212,12 +237,12 @@ class MultiModN(nn.Module):
         err_loss_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
         n_correct_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
 
-        tp_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        tn_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        fp_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        fn_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
+        # Initialization of metrics arrays and function for confusion matrix
 
-        confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+        tp_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+        tn_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+        fp_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
+        fn_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
 
         with torch.no_grad():
             for batch in test_loader:
@@ -227,7 +252,7 @@ class MultiModN(nn.Module):
                 n_samples_prediction[0] += batch_size
 
                 err_loss = torch.zeros((len(self.encoders) + 1, len(self.decoders)))
-
+                # Matrices for each batch
                 tp = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
                 tn = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
                 fp = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
@@ -247,11 +272,12 @@ class MultiModN(nn.Module):
                     n_correct_prediction[0][dec_idx] += sum(
                         prediction == target_decoder).float()
 
-                    cm = confmat(prediction, target_decoder)
-                    tp[0][dec_idx] += cm[1][1]
-                    fp[0][dec_idx] += cm[0][1]
-                    fn[0][dec_idx] += cm[1][0]
-                    tn[0][dec_idx] += cm[0][0]
+                    cm = None
+                    if decoder.n_classes == 2:
+                        confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+                        cm = confmat(prediction, target_decoder)
+
+                    compute_metrics(tp, tn, fp, fn, cm, 0, dec_idx)
 
                 for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
                                                                    shuffle_mode=self.shuffle_mode,
@@ -271,35 +297,35 @@ class MultiModN(nn.Module):
                         target_decoder = target[:, dec_idx]
                         output_decoder = decoder(state)
                         _, prediction = torch.max(output_decoder, dim=1)
-
                         err_loss[enc_idx + 1][dec_idx] = criterion(output_decoder,
                                                                    target_decoder)
                         n_correct_prediction[enc_idx + 1][dec_idx] += sum(
                             prediction == target_decoder)
 
-                        cm = confmat(prediction, target_decoder)
-                        tp[enc_idx + 1][dec_idx] += cm[1][1]
-                        fp[enc_idx + 1][dec_idx] += cm[0][1]
-                        fn[enc_idx + 1][dec_idx] += cm[1][0]
-                        tn[enc_idx + 1][dec_idx] += cm[0][0]
+                        cm = None
+                        if decoder.n_classes == 2:
+                            confmat = ConfusionMatrix(task="binary", num_classes=2).to(self.device)
+                            cm = confmat(prediction, target_decoder)
+
+                        compute_metrics(tp, tn, fp, fn, cm, enc_idx+1, dec_idx)
 
                 err_loss_prediction += err_loss.detach().numpy()
 
-                tp_prediction += tp.cpu().detach().numpy()
-                fp_prediction += fp.cpu().detach().numpy()
-                fn_prediction += fn.cpu().detach().numpy()
-                tn_prediction += tn.cpu().detach().numpy()
+                tp_prediction += tp
+                fp_prediction += fp
+                fn_prediction += fn
+                tn_prediction += tn
 
         err_loss_prediction /= n_batches
         accuracy_prediction = n_correct_prediction / n_samples_prediction
 
         sensitivity_denominator = tp_prediction + fn_prediction
-        sensitivity_prediction = np.where(sensitivity_denominator == 0, 0,
-                                          tp_prediction / sensitivity_denominator)
+        sensitivity_prediction = torch.where(sensitivity_denominator == 0, 0,
+                                          tp_prediction / sensitivity_denominator).detach().cpu().numpy()
 
         specificity_denominator = tn_prediction + fp_prediction
-        specificity_prediction = np.where(specificity_denominator == 0, 0,
-                                          tn_prediction / specificity_denominator)
+        specificity_prediction = torch.where(specificity_denominator == 0, 0,
+                                          tn_prediction / specificity_denominator).detach().cpu().numpy()
 
         balanced_accuracy_prediction = (sensitivity_prediction + specificity_prediction) / 2
 
