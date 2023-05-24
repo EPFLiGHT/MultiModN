@@ -18,9 +18,9 @@ class HAIMDecoder(nn.Module):
             self,            
             n_features: int,
             hidden_layers: Tuple[int],
-            n_classes: Optional[int] = 2,
-            hidden_activation: Optional[Callable] = F.relu,
-            output_activation: Optional[Callable] = sigmoid,
+            n_classes: int = 2,
+            hidden_activation: Callable = F.relu,
+            output_activation: Callable = sigmoid,
             device: Optional[torch.device] = None,):
         super().__init__()            
             

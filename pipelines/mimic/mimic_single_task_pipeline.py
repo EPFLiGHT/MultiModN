@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 from torch.nn import CrossEntropyLoss
 from multimodn.multimodn import MultiModN
-from multimodn.encoders import MLPEncoder
+from multimodn.encoders import MIMIC_MLPEncoder
 from multimodn.decoders import MLPDecoder
 from multimodn.history import MultiModNHistory
 from datasets.mimic import MIMICDataset
@@ -137,7 +137,7 @@ def main():
             val_loader = DataLoader(val_data, batch_size_val)       
             
             # ModN model specification
-            encoders = [MLPEncoder(state_size, partition, (encoder_hidd_units, encoder_hidd_units), activation = F.relu, dropout = dropout, ) for partition in partitions]
+            encoders = [MIMIC_MLPEncoder(state_size, partition, (encoder_hidd_units, encoder_hidd_units), activation = F.relu, dropout = dropout, ) for partition in partitions]
 
             decoders = [MLPDecoder(state_size, (decoder_hidd_units, decoder_hidd_units ), 2, output_activation = sigmoid) for _ in [target]]
             model_modn =  MultiModN(state_size, encoders, decoders, err_penalty, state_change_penalty) 

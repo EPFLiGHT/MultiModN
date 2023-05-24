@@ -60,9 +60,8 @@ class MultiModN(nn.Module):
     ):
         super(MultiModN, self).__init__()
         self.shuffle_mode = shuffle_mode
-        #self.device = device if device else torch.device(
-        #    "cuda" if torch.cuda.is_available() else "cpu")
-        self.device = 'cpu'
+        self.device = device if device else torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
         self.init_state = TrainableInitState(
             state_size, self.device) if not init_state else init_state
         self.encoders = nn.ModuleList(encoders)

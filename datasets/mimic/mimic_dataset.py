@@ -92,7 +92,7 @@ def mimic_get_nips_pathology_data(fname, targets, sources, put_none, indices_to_
     data_dir = os.path.join(base_path, 'datasets/mimic', targets[0])
     source_spec = '_'.join(sources)
     # path to the pre-processed embedding data containing only valid samples for ecm and cardiomegaly
-    fname = os.path.join(base_path + 'datasets/mimic', 'Enlarged Cardiomediastinum_Cardiomegaly', source_spec, 'data.csv')    
+    fname = os.path.join(base_path, 'datasets/mimic', 'Enlarged Cardiomediastinum_Cardiomegaly', source_spec, 'data.csv')    
     features, partitions, viz_features = [], [], []        
     if not os.path.exists(data_dir):
         os.makedirs(data_dir) 
@@ -176,6 +176,7 @@ class MIMICDataset(Dataset):
             data = pd.DataFrame(StandardScaler().fit_transform(data[features]), columns=features, index=data.index)
             
         if nanfill:      
+            print('Number of samples with missing values = ', sum(data.isnull().any(axis=1).values))
             data.fillna(0, inplace = True)
         self.X = data.values
         self.partitions = partitions    
