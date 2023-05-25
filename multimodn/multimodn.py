@@ -23,7 +23,7 @@ def get_performance_metrics(y_true, y_pred, y_prob):
     roc = ROC(task="binary", num_classes=2)
     pr_curve = PrecisionRecallCurve(task="binary", num_classes=2)
     accuracy_score = Accuracy(task="binary", num_classes=2)
-    roc_auc_score = AUROC(task="binary", num_classes=2)
+    roc_auc_score = AUROC(task="binary", num_classes=2, average = 'macro')
     confmat = ConfusionMatrix(task="binary", num_classes=2)
     
     cm = confmat(y_pred, y_true)
@@ -273,7 +273,6 @@ class MultiModN(nn.Module):
         n_correct_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
 
         output_decoder_epoch = [[]] * len(self.decoders)
-
 
         tp_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
         tn_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)

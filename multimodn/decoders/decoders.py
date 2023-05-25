@@ -25,7 +25,7 @@ class MLPDecoder(MultiModDecoder):
             self,
             state_size: int,            
             hidden_layers: Tuple[int],
-            n_classes: int,
+            n_classes: int = 2,
             output_activation: Optional[Callable] = sigmoid,
             hidden_activation: Optional[Callable] = F.relu,
             device: Optional[torch.device] = None,
@@ -33,6 +33,7 @@ class MLPDecoder(MultiModDecoder):
         super().__init__(state_size)
         self.output_activation = output_activation
         self.hidden_activation = hidden_activation
+        self.n_classes = n_classes
         dim_layers = [self.state_size] + list(hidden_layers) + [n_classes, ]
         self.layers = nn.ModuleList()
         for i, (in_dim, out_dim) in enumerate(zip(dim_layers, dim_layers[1:])):  

@@ -3,7 +3,6 @@ import os
 from os import path as o
 storage_path = o.abspath(o.join(o.dirname(sys.modules[__name__].__file__), "../.."))
 sys.path.append(storage_path)
-
 from tqdm.auto import trange
 import torch
 from torch import Tensor, sigmoid
@@ -17,18 +16,15 @@ from multimodn.decoders import MLPDecoder
 from multimodn.history import MultiModNHistory
 from datasets.mimic import MIMICDataset
 from pipelines import utils
-
+import argparse
+import importlib
+import haim_api
+importlib.reload(haim_api)
+from haim_api import HAIMDecoder, HAIM
 import pickle as pkl
 
 from sklearn.model_selection import train_test_split, StratifiedKFold
 import pandas as pd
-
-import argparse
-import importlib
-
-import haim_api
-importlib.reload(haim_api)
-from haim_api import HAIMDecoder, HAIM
 import numpy as np
 
 performance_metrics = ['f1', 'auc', 'accuracy', 'sensitivity', 'specificity', 'fpr', 'tpr', 'precision', 'recall', \
@@ -44,9 +40,6 @@ source_size = [ 6, 1024, 1024, 99, 242, 110, 768, 768, 768]
 
 source_dict = dict(zip(source_names, source_size))
 
-cols = hyperparameters + performance_metrics
-
-
 def main():
     PIPELINE_NAME = utils.extract_pipeline_name(sys.argv[0])    
     criterion = '(auc + bac)'    
@@ -54,7 +47,7 @@ def main():
     if not os.path.exists(results_directory):
         os.makedirs(results_directory)               
     
-    model_type = PIPELINE_NAME + criterion    
+    model_type = PIPELINE_NAME + '_' + criterion    
     
     results_path = os.path.join(results_directory, model_type + '.csv') 
     
@@ -71,7 +64,7 @@ def main():
 
     learning_rate = .001
 
-    epochs =  100
+    epochs =  1
 
     decoder_hidd_units =  32
 
@@ -104,30 +97,22 @@ def main():
     patient_labels = pd.read_csv(os.path.join(data_file_path_buff,'how_to_split.csv'))
     df = pd.read_csv(os.path.join(data_file_path_buff,'data.csv'))    
     haim_id = np.array(patient_labels['haim_id'])
-    labels = np.array(patient_labels['label'])        
-
+    labels = np.array(patient_labels['label'])  
     
     seed = 0            
     skf = StratifiedKFold(n_splits=nfold, shuffle = True, random_state = seed)
 
     for i, (id_train, id_test_val) in enumerate(skf.split(haim_id, labels)):
+        torch.manual_seed(seed)
         ex_prefix = f'seed_{seed}_state_size_{state_size}_batch_size_{batch_size_train}_dec_hidd_units_{decoder_hidd_units}_dropout_{dropout}'
         part_of_hyperparameters = [seed, i, state_size, batch_size_train, encoder_hidd_units, decoder_hidd_units, dropout, epochs ]
         
-        torch.manual_seed(seed)        
-        
         train_ind = list(df[df.haim_id.isin(haim_id[id_train])].index) 
-        train_len = len(train_ind)
-
-        haim_id_test_and_val = patient_labels.iloc[list(id_test_val)]['haim_id']
-        labels_test_val = labels[id_test_val]       
-
+        haim_id_test_and_val = patient_labels.iloc[id_test_val]['haim_id']
+        labels_test_val = labels[id_test_val]
         id_test, id_val, _, _ = train_test_split(haim_id_test_and_val, labels_test_val, test_size = .5, stratify = labels_test_val, random_state = seed)
-
-        val_ind =  list(df[df.haim_id.isin(id_val)].index)  
-        val_len = len(val_ind)
-        test_ind = list(df[df.haim_id.isin(id_test)].index)         
-        test_len = len(test_ind)                
+        val_ind =  df[df.haim_id.isin(id_val)].index
+        test_ind = df[df.haim_id.isin(id_test)].index           
 
         train_data, val_data =  Subset(dataset_modn, train_ind), Subset(dataset_modn, val_ind)             
         train_loader = DataLoader(train_data, batch_size_train)
@@ -135,7 +120,6 @@ def main():
 
         # ModN model specification
         encoders = [MIMIC_MLPEncoder(state_size, partition, (encoder_hidd_units, encoder_hidd_units), activation = F.relu, dropout = dropout, ) for partition in partitions]
-
         decoders = [MLPDecoder(state_size, (decoder_hidd_units, decoder_hidd_units ), 2, output_activation = sigmoid) for _ in targets]
         model_modn =  MultiModN(state_size, encoders, decoders, err_penalty, state_change_penalty) 
 
@@ -158,24 +142,22 @@ def main():
                 train_buff_modn = model_modn.train_epoch(train_loader, optimizer, criterion, history, last_epoch = True)       
             else:
                 model_modn.train_epoch(train_loader, optimizer, criterion, history)
-            val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')
-            
-            auc_test = 0
-            bac_test = 0
+            val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')            
+            auc_val = 0
+            bac_val = 0
             for val_buff_item in val_buff_modn:
-                auc_test += val_buff_item[1]
-                bac_test +=  (val_buff_item[3] + val_buff_item[4]) / 2
-            sum_auc_bac = auc_test + bac_test
+                auc_val += val_buff_item[1]
+                bac_val +=  (val_buff_item[3] + val_buff_item[4]) / 2
+            auc_bac_sum = auc_val + bac_val
 
-            if sum_auc_bac > best_auc_bac_sum:                                        
+            if auc_bac_sum > best_auc_bac_sum:                                        
                 torch.save({
                 'epoch': epoch+1,
                 'model_state_dict': model_modn.state_dict(),                    
-                'auc_f1_test_cum': sum_auc_bac,
+                'auc_bac_val_cum': auc_bac_sum,
                 }, best_model_path_modn)  
-                best_auc_bac_sum = sum_auc_bac
+                best_auc_bac_sum = auc_bac_sum
                 val_buff_modn_best = val_buff_modn
-
         pkl.dump(model_modn, open(model_path_modn, 'wb'))
 
         directory = os.path.join(storage_path, 'history', model_spec, source_spec)                
@@ -195,21 +177,20 @@ def main():
         
         # ModN testing
         test_data =  Subset(dataset_modn, test_ind)
-        test_loader = DataLoader(test_data, batch_size_val)           
-
+        test_loader = DataLoader(test_data, batch_size_val)
         checkpoint = torch.load(best_model_path_modn)  
         model_modn.load_state_dict(checkpoint['model_state_dict'])
         test_modn_best = model_modn.test(test_loader, criterion)
-        results_modn_best = pd.DataFrame(columns=cols, index = [0]) 
+        results_modn_best = pd.DataFrame(columns=save_logs, index = [0]) 
         for t, target in enumerate(targets):
-            results_modn_best = pd.DataFrame(columns=cols, index = [0])
-            row = [target] + part_of_hyperparameters + list(test_modn_best[t])
+            results_modn_best = pd.DataFrame(columns=save_logs, index = [0])
+            test_modn_best_sngl = list(map(lambda metric: metric.numpy(), test_modn_best[t]))
+            row = [target] + part_of_hyperparameters + test_modn_best_sngl
             results_modn_best.iloc[0] = row
             if os.path.isfile(results_path):
                 results_modn_best.to_csv(results_path, mode='a', index=False, header=False)
             else:
-                results_modn_best.to_csv(results_path, mode='w', index=False)                
-
+                results_modn_best.to_csv(results_path, mode='w', index=False)
         seed += 1
 if __name__ == "__main__":
     main()
