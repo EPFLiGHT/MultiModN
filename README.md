@@ -54,4 +54,4 @@ Quick start running MultiModN on Titanic example pipeline with a multilayer perc
 ./datasets/titanic/get_data.sh
 python3 pipelines/titanic/titanic_mlp_pipeline.py
 ```
-Open `pipelines/titanic/titanic_mlp.png` to look at the training curves.
+Open `pipelines/titanic/plots/titanic_mlp.png` to look at the training curves.
