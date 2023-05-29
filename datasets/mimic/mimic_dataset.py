@@ -85,14 +85,13 @@ def mimic_get_overlap_pathologies_data(fname, sources, targets, put_none, indice
             features_to_nan = demo_features 
         none_string = [None] * len(features_to_nan)            
         data.loc[indices_to_nan, features_to_nan] = none_string     
-
     return data, labels, features, partitions
 
 def mimic_get_nips_pathology_data(fname, targets, sources, put_none, indices_to_nan,  features_to_nan):  
     data_dir = os.path.join(base_path, 'datasets/mimic', targets[0])
     source_spec = '_'.join(sources)
     # path to the pre-processed embedding data containing only valid samples for ecm and cardiomegaly
-    fname = os.path.join(base_path, 'datasets/mimic', 'Enlarged Cardiomediastinum_Cardiomegaly', source_spec, 'data.csv')    
+    fname = os.path.join(base_path, 'datasets/mimic', 'Enlarged Cardiomediastinum_Cardiomegaly', source_spec, 'data.csv')   
     features, partitions, viz_features = [], [], []        
     if not os.path.exists(data_dir):
         os.makedirs(data_dir) 
@@ -145,8 +144,7 @@ def mimic_get_nips_pathology_data(fname, targets, sources, put_none, indices_to_
         if features_to_nan == 'demo':
             features_to_nan = demo_features
         none_string = [None] * len(features_to_nan)         
-        data.loc[indices_to_nan, features_to_nan] = none_string  
-    
+        data.loc[indices_to_nan, features_to_nan] = none_string      
     return data, labels, features, partitions 
  
 
@@ -243,4 +241,3 @@ class MIMICDataset(Dataset):
         X_split = np.split(self.X, partition_offsets, axis=1)
 
         return [PartitionDataset(X_split[i], self.y, [partition]) for i, partition in enumerate(partitions)]
-

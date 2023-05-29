@@ -7,7 +7,7 @@ from multimodn.encoders import MultiModEncoder
 
 
 class MIMIC_MLPEncoder(MultiModEncoder):
-    """Multi-layer perceptron encoder for MIMIC in a paper"""
+    """Multi-layer perceptron encoder for MIMIC in the paper"""
     def __init__(
             self,
             state_size: int,
