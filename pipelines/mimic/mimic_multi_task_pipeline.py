@@ -30,7 +30,7 @@ import numpy as np
 performance_metrics = ['f1', 'auc', 'accuracy', 'sensitivity', 'specificity', 'fpr', 'tpr', 'precision', 'recall', \
     'tn', 'fp', 'fn', 'tp', 'thr_roc', 'thr_pr']
 
-hyperparameters = ['model', 'seed', 'fold', 'state_size', 'batch_size', 'encoder_hidd_units', 'decoder_hidd_units', 'dropout', 'epochs']
+hyperparameters = ['target', 'seed', 'fold', 'state_size', 'batch_size', 'encoder_hidd_units', 'decoder_hidd_units', 'dropout', 'epochs']
 
 save_logs = hyperparameters + performance_metrics
 
@@ -47,9 +47,9 @@ def main():
     if not os.path.exists(results_directory):
         os.makedirs(results_directory)               
     
-    model_type = PIPELINE_NAME + '_' + criterion    
+    model_type = PIPELINE_NAME + '_' + criterion 
     
-    results_path = os.path.join(results_directory, model_type + '.csv') 
+    results_file_path = os.path.join(results_directory, model_type + '.csv') 
     
     sources = ['de', 'vd', 'n_ech', 'ts_ce']
 
@@ -64,7 +64,7 @@ def main():
 
     learning_rate = .001
 
-    epochs =  1
+    epochs =  100
 
     decoder_hidd_units =  32
 
@@ -79,10 +79,6 @@ def main():
     batch_size_val = batch_size_train    
 
     encoder_hidd_units = decoder_hidd_units
-    
-    keep_missing_values = True
-
-    miss_perc = 0
 
     nfold = 5    
 
@@ -90,15 +86,15 @@ def main():
     
     # ModN Dataset creation
     dataset_modn = MIMICDataset(sources, targets = targets)  
-    data, y, partitions = dataset_modn.X, dataset_modn.y, dataset_modn.partitions           
+    partitions = dataset_modn.partitions           
     dataset_modn = dataset_modn.partition_dataset(partitions)  
     # Dataset splitting based on hospitalisation id & aggregated label, i.e. samples with the same haim_id should be all either in train or validation or test subsets   
     data_file_path_buff = os.path.join(storage_path,'datasets/mimic', pathologies, source_spec)
     patient_labels = pd.read_csv(os.path.join(data_file_path_buff,'how_to_split.csv'))
     df = pd.read_csv(os.path.join(data_file_path_buff,'data.csv'))    
     haim_id = np.array(patient_labels['haim_id'])
-    labels = np.array(patient_labels['label'])  
-    
+    labels = np.array(patient_labels['label'])
+
     seed = 0            
     skf = StratifiedKFold(n_splits=nfold, shuffle = True, random_state = seed)
 
@@ -107,7 +103,7 @@ def main():
         ex_prefix = f'seed_{seed}_state_size_{state_size}_batch_size_{batch_size_train}_dec_hidd_units_{decoder_hidd_units}_dropout_{dropout}'
         part_of_hyperparameters = [seed, i, state_size, batch_size_train, encoder_hidd_units, decoder_hidd_units, dropout, epochs ]
         
-        train_ind = list(df[df.haim_id.isin(haim_id[id_train])].index) 
+        train_ind = df[df.haim_id.isin(haim_id[id_train])].index
         haim_id_test_and_val = patient_labels.iloc[id_test_val]['haim_id']
         labels_test_val = labels[id_test_val]
         id_test, id_val, _, _ = train_test_split(haim_id_test_and_val, labels_test_val, test_size = .5, stratify = labels_test_val, random_state = seed)
@@ -149,7 +145,7 @@ def main():
                 auc_val += val_buff_item[1]
                 bac_val +=  (val_buff_item[3] + val_buff_item[4]) / 2
             auc_bac_sum = auc_val + bac_val
-
+            # Save checkpoint with the highest cumulative (across targets) validation auroc + bac
             if auc_bac_sum > best_auc_bac_sum:                                        
                 torch.save({
                 'epoch': epoch+1,
@@ -180,17 +176,16 @@ def main():
         test_loader = DataLoader(test_data, batch_size_val)
         checkpoint = torch.load(best_model_path_modn)  
         model_modn.load_state_dict(checkpoint['model_state_dict'])
-        test_modn_best = model_modn.test(test_loader, criterion)
-        results_modn_best = pd.DataFrame(columns=save_logs, index = [0]) 
+        test_modn_best = model_modn.test(test_loader, criterion)         
         for t, target in enumerate(targets):
-            results_modn_best = pd.DataFrame(columns=save_logs, index = [0])
+            results_modn_best = pd.DataFrame(columns=save_logs)
             test_modn_best_sngl = list(map(lambda metric: metric.numpy(), test_modn_best[t]))
             row = [target] + part_of_hyperparameters + test_modn_best_sngl
-            results_modn_best.iloc[0] = row
-            if os.path.isfile(results_path):
-                results_modn_best.to_csv(results_path, mode='a', index=False, header=False)
+            results_modn_best.loc[0] = row
+            if os.path.isfile(results_file_path):
+                results_modn_best.to_csv(results_file_path, mode='a', index=False, header=False)
             else:
-                results_modn_best.to_csv(results_path, mode='w', index=False)
+                results_modn_best.to_csv(results_file_path, mode='w', index=False)
         seed += 1
 if __name__ == "__main__":
     main()

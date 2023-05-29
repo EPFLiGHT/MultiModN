@@ -18,13 +18,14 @@ from torchmetrics import ConfusionMatrix, F1Score, ROC, PrecisionRecallCurve, Ac
 performance_metrics = ['f1', 'auc',  'accuracy', 'sensitivity', 'specificity', 'fpr', 'tpr', 'precision', 'recall', \
     'tn', 'fp', 'fn', 'tp', 'thr_roc', 'thr_pr']
 
+# Calculation of various performance metrics for the binary classification task (default)
 def get_performance_metrics(y_true, y_pred, y_prob):
-    f1_score = F1Score(task="binary", num_classes=2, average = 'macro') # specifying task as'binary' and num_classes equal to two is redundant
-    roc = ROC(task="binary", num_classes=2)
-    pr_curve = PrecisionRecallCurve(task="binary", num_classes=2)
-    accuracy_score = Accuracy(task="binary", num_classes=2)
-    roc_auc_score = AUROC(task="binary", num_classes=2, average = 'macro')
-    confmat = ConfusionMatrix(task="binary", num_classes=2)
+    f1_score = F1Score(task="binary", average = 'macro')
+    roc = ROC(task="binary")
+    pr_curve = PrecisionRecallCurve(task="binary")
+    accuracy_score = Accuracy(task="binary")
+    roc_auc_score = AUROC(task="binary", average = 'macro')
+    confmat = ConfusionMatrix(task="binary")
     
     cm = confmat(y_pred, y_true)
     tp = cm[1][1] 
@@ -44,7 +45,7 @@ def get_performance_metrics(y_true, y_pred, y_prob):
     fpr, tpr, thr_roc = roc(y_prob, y_true)   
     precision, recall, thr_pr = pr_curve(y_prob, y_true)   
     
-    return f1_score(y_pred, y_true), roc_auc_score(y_prob, y_true), accuracy_score(y_pred, y_true), sensitivity, specificity, fpr, tpr, precision, recall, \
+    return f1_score(y_prob, y_true), roc_auc_score(y_prob, y_true), accuracy_score(y_pred, y_true), sensitivity, specificity, fpr, tpr, precision, recall, \
       tn, fp, fn, tp, thr_roc, thr_pr
 
 def compute_metrics(tp, tn, fp, fn, cm, enc_idx, dec_idx):
@@ -116,7 +117,6 @@ class MultiModN(nn.Module):
         for batch_idx, batch in enumerate(train_loader):
             # Note: for multiclass target should be = [0, n_classes -1] for the correctness of CrossEntropyLoss
             data, target, encoder_sequence = (list(batch) + [None])[:3]
-
             batch_size = target.shape[0]
             n_samples_epoch[0] += batch_size
 
@@ -350,6 +350,7 @@ class MultiModN(nn.Module):
                         fn[enc_idx + 1][dec_idx] += cm[1][0]
                         tn[enc_idx + 1][dec_idx] += cm[0][0]
                         
+                        # To calculate the performance metrics for the decoder taking as input the state after the last encoder
                         if enc_idx == len(self.encoders)-1 and batch_idx== 0:
                             output_decoder_epoch[dec_idx] = output_decoder.cpu().detach()
                         elif enc_idx == len(self.encoders)-1:
@@ -406,10 +407,12 @@ class MultiModN(nn.Module):
             if tag not in history.balanced_accuracy:
                 history.balanced_accuracy[tag] = []
             history.balanced_accuracy[tag].append(balanced_accuracy_prediction)
-            
+        # Output the results for each decoder with the state vector after the last encoder as input   
         results = [[]] * len(self.decoders)          
         for dec_idx in range(len(output_decoder_epoch)):
             output_decoder_epoch_dec_idx = output_decoder_epoch[dec_idx] 
+            # Normalize so that the class probabilities sum to 1
+            output_decoder_epoch_dec_idx = torch.div(output_decoder_epoch_dec_idx, torch.sum(output_decoder_epoch_dec_idx, dim =1).reshape(-1,1))
             _ , prediction_epoch_dec_idx = torch.max(output_decoder_epoch_dec_idx, dim=1)       
             target_decoder_epoch_dec_idx = target_decoder_epoch[:, dec_idx]     
             results[dec_idx] = get_performance_metrics(target_decoder_epoch_dec_idx, prediction_epoch_dec_idx, output_decoder_epoch_dec_idx[:,1])

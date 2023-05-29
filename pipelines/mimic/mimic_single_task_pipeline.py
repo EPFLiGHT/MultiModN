@@ -50,7 +50,7 @@ def main():
     
     model_type = PIPELINE_NAME + '_' + criterion    
     
-    results_path = os.path.join(results_directory, model_type + '.csv') 
+    results_file_path = os.path.join(results_directory, model_type + '.csv') 
     
     sources = ['de', 'vd', 'n_ech', 'ts_ce']
 
@@ -81,8 +81,6 @@ def main():
 
     encoder_hidd_units = decoder_hidd_units
     
-    keep_missing_values = True
-
     miss_perc = 0
 
     nfold = 5    
@@ -102,7 +100,7 @@ def main():
         # ModN and HAIM Dataset creation
         dataset_modn = MIMICDataset(sources, targets = [target]) 
         dataset_haim = copy.deepcopy(dataset_modn)
-        _, _, partitions = dataset_modn.X, dataset_modn.y, dataset_modn.partitions           
+        partitions = dataset_modn.partitions           
         dataset_modn = dataset_modn.partition_dataset(partitions)
         
         for i, (id_train, id_test_val) in enumerate(skf.split(haim_id, labels)):
@@ -147,7 +145,7 @@ def main():
                 else:
                     model_modn.train_epoch(train_loader, optimizer, criterion, history)
                 val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')
-
+                # Save the best model based on the sum of validation auroc and bac
                 auc_bac_sum =  val_buff_modn[0][1] + (val_buff_modn[0][3] + val_buff_modn[0][4]) / 2
 
                 if auc_bac_sum > best_auc_bac_sum:                                        
@@ -183,14 +181,14 @@ def main():
             checkpoint = torch.load(best_model_path_modn)  
             model_modn.load_state_dict(checkpoint['model_state_dict'])
             test_modn_best = model_modn.test(test_loader, criterion)
-            results_modn_best = pd.DataFrame(columns=save_logs, index = [0])
+            results_modn_best = pd.DataFrame(columns=save_logs,)
             test_modn_best_sngl = list(map(lambda metric: metric.numpy(), test_modn_best[0]))
             row = ['modn'] + part_of_hyperparameters + test_modn_best_sngl
-            results_modn_best.iloc[0] = row
-            if os.path.isfile(results_path):
-                results_modn_best.to_csv(results_path, mode='a', index=False, header=False)
+            results_modn_best.loc[0] = row
+            if os.path.isfile(results_file_path):
+                results_modn_best.to_csv(results_file_path, mode='a', index=False, header=False)
             else:
-                results_modn_best.to_csv(results_path, mode='w', index=False)            
+                results_modn_best.to_csv(results_file_path, mode='w', index=False)            
 
             train_data, val_data =  Subset(dataset_haim, train_ind), Subset(dataset_haim, val_ind) 
             train_loader = DataLoader(train_data, batch_size_train)
@@ -218,7 +216,7 @@ def main():
 
                 val_buff_haim = model_haim.test(val_loader, criterion)
                 auc_bac_sum = val_buff_haim[1] + (val_buff_haim[3] + val_buff_haim[4]) / 2
-
+                # Save the best model based on the sum of validation auroc and bac
                 if auc_bac_sum > best_auc_bac_sum:                                        
                     torch.save({
                     'epoch': epoch+1,
@@ -237,14 +235,14 @@ def main():
             checkpoint = torch.load(best_model_path_haim)  
             model_haim.load_state_dict(checkpoint['model_state_dict'])
             test_haim_best = model_haim.test(test_loader, criterion)
-            results_haim_best = pd.DataFrame(columns = save_logs, index = [0])
+            results_haim_best = pd.DataFrame(columns = save_logs, )
             test_haim_best_sngl = list(map(lambda metric: metric.numpy(), test_haim_best))
             row = ['haim'] + part_of_hyperparameters + test_haim_best_sngl
-            results_haim_best.iloc[0] = row
-            if os.path.isfile(results_path):
-                results_haim_best.to_csv(results_path, mode='a', index=False, header=False)
+            results_haim_best.loc[0] = row
+            if os.path.isfile(results_file_path):
+                results_haim_best.to_csv(results_file_path, mode='a', index=False, header=False)
             else:
-                results_haim_best.to_csv(results_path, mode='w', index=False)
+                results_haim_best.to_csv(results_file_path, mode='w', index=False)
             seed += 1
 
 if __name__ == "__main__":
