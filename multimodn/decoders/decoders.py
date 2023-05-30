@@ -26,7 +26,7 @@ class MLPDecoder(MultiModDecoder):
             state_size: int,            
             hidden_layers: Tuple[int],
             n_classes: int = 2,
-            output_activation: Optional[Callable] = sigmoid,
+            output_activation: Callable = sigmoid,
             hidden_activation: Optional[Callable] = F.relu,
             device: Optional[torch.device] = None,
     ):
