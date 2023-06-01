@@ -9,7 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from typing import Callable, Optional, Tuple, Union
-from multimodn.multimodn import get_performance_metrics
+from torchmetrics import MetricCollection, ConfusionMatrix, F1Score, ROC, PrecisionRecallCurve, Accuracy, AUROC
+from multimodn.multimodn import get_metrics_collection, store_performance, unravel_confusion_matrix, get_results
 
 class HAIMDecoder(nn.Module):    
     def __init__(
@@ -56,7 +57,7 @@ class HAIM(nn.Module):
             
     ) -> None:
 
-        self.train()
+        self.train()        
         
         for batch_idx, batch in enumerate(train_loader):
             data, target = list(batch)[:2]     
@@ -83,28 +84,23 @@ class HAIM(nn.Module):
             criterion: Union[nn.Module, Callable],
     ):
         self.eval()
+        local_performance_storage = store_performance(1, 1, self.device)
+        n_batches = len(test_loader)
         with torch.no_grad():
-
             for batch_ind, batch in enumerate(test_loader):
                 data, target = (list(batch))[:2]
                 target = target.type(torch.LongTensor)
                 target = target.to(self.device)
                 data = data.to(self.device)
-                target = target[:,0]                
-                if batch_ind == 0:  
-                    target_decoder_epoch = target.cpu().detach()
-                else:
-                    target_decoder_epoch = torch.cat((target_decoder_epoch, target.cpu().detach()), dim = 0)                   
+                target = target[:,0]      
                 output_decoder = self.decoder(data)
-                if batch_ind == 0:
-                    output_decoder_epoch = output_decoder.cpu().detach()
-                else:
-                    output_decoder_epoch= torch.cat((output_decoder_epoch, output_decoder.cpu().detach()), dim = 0)        
-     
-        output_decoder_epoch = torch.div(output_decoder_epoch, torch.sum(output_decoder_epoch, dim =1).reshape(-1,1))    
-        _ , prediction_epoch = torch.max(output_decoder_epoch, dim=1)        
-        
-        return get_performance_metrics(target_decoder_epoch, prediction_epoch, output_decoder_epoch[:,1])
+                output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim=1).reshape(-1,1))
+                local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)
+                if batch_ind == (n_batches - 1):
+                    haim_decoder_dict = local_performance_storage[0][0].compute()                      
+                    local_performance_storage[0][0].reset()
+                    results = get_results(haim_decoder_dict)
+        return results
     
     
     def predict(
