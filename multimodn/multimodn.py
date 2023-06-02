@@ -52,22 +52,20 @@ def get_results(results_dict):
     fp = confmat[0][1]
     fn = confmat[1][0]
     tn = confmat[0][0]
-    
+  
     if (tp + fn) != 0:
         sensitivity = tp / (tp + fn)
     else:
-        sensitivity = 0
+        sensitivity = torch.zeros([1])
     if (tn + fp) != 0:
         specificity = tn / (tn + fp)   
     else:
-        specificity = 0
+        specificity = torch.zeros([1])
         
     fpr, tpr, thr_roc = results_dict['roc-curve']
-    precision, recall, thr_pr = results_dict['pr-curve']
-    
+    precision, recall, thr_pr = results_dict['pr-curve']    
     results = results_dict['f1-score'], results_dict['auroc'], results_dict['accuracy'], sensitivity, specificity, fpr, tpr, precision, recall, \
       tn, fp, fn, tp, thr_roc, thr_pr
-    
     results = list(map(lambda metric: metric.cpu().detach(), results))   
   
     return results
