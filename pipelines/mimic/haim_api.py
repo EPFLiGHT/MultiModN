@@ -53,12 +53,10 @@ class HAIM(nn.Module):
             train_loader: DataLoader,
             optimizer: Optimizer,
             criterion: Union[nn.Module, Callable],           
-            last_epoch: bool = False,          
-            
     ) -> None:
-
+        n_batches = len(train_loader)
         self.train()        
-        
+        local_performance_storage = store_performance(1, 1, self.device)
         for batch_idx, batch in enumerate(train_loader):
             data, target = list(batch)[:2]     
             batch_size = target.shape[0]
@@ -74,9 +72,15 @@ class HAIM(nn.Module):
             err_loss = criterion(output_decoder, target)
             err_loss.backward()
             optimizer.step()        
-
-        if last_epoch:  
-            return self.test(train_loader, criterion)   
+            
+            output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim=1).reshape(-1,1))
+            local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)
+            if batch_idx == (n_batches - 1):
+                haim_decoder_dict = local_performance_storage[0][0].compute()                      
+                local_performance_storage[0][0].reset() # -/(2)/-
+                results = get_results(haim_decoder_dict)
+        return results
+  
         
     def test(
             self,
@@ -98,7 +102,7 @@ class HAIM(nn.Module):
                 local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)
                 if batch_ind == (n_batches - 1):
                     haim_decoder_dict = local_performance_storage[0][0].compute()                      
-                    local_performance_storage[0][0].reset()
+                    local_performance_storage[0][0].reset() # -/(2)/-
                     results = get_results(haim_decoder_dict)
         return results
     

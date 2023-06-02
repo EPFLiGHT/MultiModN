@@ -181,10 +181,7 @@ def main():
             # ModN training            
             best_auc_bac_sum = 0
             for epoch in trange(epochs):            
-                if epoch == epochs - 1:
-                    train_buff_modn = model_modn.train_epoch(train_loader, optimizer, criterion, history, last_epoch = True)        
-                else:
-                    model_modn.train_epoch(train_loader, optimizer, criterion, history)
+                train_buff_modn = model_modn.train_epoch(train_loader, optimizer, criterion, history)
                 val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')
                 auc_bac_sum =  val_buff_modn[0][1] + (val_buff_modn[0][3] + val_buff_modn[0][4]) / 2
                 # Save the best model based on the sum of validation auroc and bac
@@ -286,20 +283,16 @@ def main():
             model_haim =  HAIM(haim_decoder) 
             optimizer = torch.optim.Adam(list(model_haim.parameters()), learning_rate)
             criterion = CrossEntropyLoss()
-
-           
+            
             directory = os.path.join(storage_path, 'models', model_spec, source_spec)
             model_path_haim = os.path.join(directory, PIPELINE_NAME + f'_haim_model_{ex_prefix}.pkl')
             best_model_path_haim = os.path.join(directory, PIPELINE_NAME + f'_haim_best_model_{ex_prefix}.pt')
 
             # HAIM training
             best_auc_bac_sum = 0
-            for epoch in trange(epochs):     
-                if epoch == epochs - 1:
-                    train_buff_haim = model_haim.train_epoch(train_loader, optimizer, criterion, last_epoch = True)                    
-                else:
-                    model_haim.train_epoch(train_loader, optimizer, criterion)
-                    val_buff_haim = model_haim.test(val_loader, criterion)
+            for epoch in trange(epochs):  
+                train_buff_haim = model_haim.train_epoch(train_loader, optimizer, criterion, )  
+                val_buff_haim = model_haim.test(val_loader, criterion)
                 auc_bac_sum = val_buff_haim[1] + (val_buff_haim[3] + val_buff_haim[4]) / 2
                 if auc_bac_sum > best_auc_bac_sum:                                        
                     torch.save({
@@ -308,10 +301,8 @@ def main():
                     'auc_bac_val': auc_bac_sum,
                     }, best_model_path_haim)  
                     best_auc_bac_sum = auc_bac_sum
-                    val_buff_haim_best = val_buff_haim
-                    
-            pkl.dump(model_haim, open(model_path_haim, 'wb'))
-            
+                    val_buff_haim_best = val_buff_haim                    
+            pkl.dump(model_haim, open(model_path_haim, 'wb'))            
             # HAIM testing
             if put_none:
                 for both in boths: 

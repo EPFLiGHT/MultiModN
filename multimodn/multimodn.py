@@ -22,13 +22,14 @@ warnings.filterwarnings("ignore")
 
 def get_metrics_collection(task, num_classes, average, device):        
     return MetricCollection({
-        'macro f1-score': F1Score(task = task, num_classes = num_classes, average = average, ),
-        'macro auroc': AUROC(task = task, num_classes = num_classes, average = average, ),
+        'f1-score': F1Score(task = task, num_classes = num_classes, average = average, ),
+        'auroc': AUROC(task = task, num_classes = num_classes, average = average, ),
         'accuracy': Accuracy(task = task, num_classes = num_classes, ),        
         'roc-curve': ROC(task = task, num_classes = num_classes, ), 
         'pr-curve': PrecisionRecallCurve(task = task, num_classes = num_classes, ), 
-        'confusion matrix': ConfusionMatrix(task = task, num_classes = num_classes, ),    
-    }).to(device)
+        'confusion matrix': ConfusionMatrix(task = task, num_classes = num_classes, )},    
+        compute_groups=[['f1-score', 'accuracy', 'confusion matrix'], ['auroc', 'roc-curve', 'pr-curve']]
+    ).to(device)
 
 def store_performance(enc_nr, dec_nr, device, task = 'binary', num_classes = 2, average = 'macro'):    
     performance_storage = defaultdict(dict)
@@ -64,7 +65,7 @@ def get_results(results_dict):
     fpr, tpr, thr_roc = results_dict['roc-curve']
     precision, recall, thr_pr = results_dict['pr-curve']
     
-    results = results_dict['macro f1-score'], results_dict['macro auroc'], results_dict['accuracy'], sensitivity, specificity, fpr, tpr, precision, recall, \
+    results = results_dict['f1-score'], results_dict['auroc'], results_dict['accuracy'], sensitivity, specificity, fpr, tpr, precision, recall, \
       tn, fp, fn, tp, thr_roc, thr_pr
     
     results = list(map(lambda metric: metric.cpu().detach(), results))   
@@ -103,17 +104,14 @@ class MultiModN(nn.Module):
             criterion: Union[nn.Module, Callable],
             history: Optional[MultiModNHistory] = None,
             log_interval: Optional[int] = None,
-            logger: Optional[Callable] = None,
-            last_epoch: Optional[bool] = False,
+            logger: Optional[Callable] = None,          
     ) -> None:
         # If log interval is given and logger is not, use print as default logger
         if log_interval and not logger:
             logger = print
         self.train()
-
         n_batches = len(train_loader)
-        n_samples_epoch = np.ones((len(self.encoders) + 1, 1))
-        
+        accuracy_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)        
         tp_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
         tn_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
         fp_epoch = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
@@ -121,7 +119,6 @@ class MultiModN(nn.Module):
 
         err_loss_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
         state_change_epoch = np.zeros(len(self.encoders))
-        n_correct_epoch = np.zeros((len(self.encoders) + 1, len(self.decoders)))
         
         local_performance_storage = store_performance(len(self.encoders), len(self.decoders), self.device)
         
@@ -129,8 +126,6 @@ class MultiModN(nn.Module):
             # Note: for multiclass target should be = [0, n_classes -1] for the correctness of CrossEntropyLoss
             data, target, encoder_sequence = (list(batch) + [None])[:3]
             batch_size = target.shape[0]
-            n_samples_epoch[0] += batch_size
-
             err_loss = torch.zeros((len(self.encoders) + 1, len(self.decoders)))
             state_change = torch.zeros(len(self.encoders))
 
@@ -146,20 +141,19 @@ class MultiModN(nn.Module):
             for dec_idx, decoder in enumerate(self.decoders):
                 target_decoder = target[:, dec_idx]
                 output_decoder = decoder(state)
-                output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim =1).reshape(-1,1))
+                output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim=1).reshape(-1,1))
                 _, prediction = torch.max(output_decoder, dim=1)
 
-                err_loss[0][dec_idx] = criterion(output_decoder, target_decoder)
-                n_correct_epoch[0][dec_idx] += sum(prediction == target_decoder).float()
-                
-                local_performance_storage[0][dec_idx].forward(output_decoder_proba[:,1], target_decoder)
+                err_loss[0][dec_idx] = criterion(output_decoder, target_decoder)                
+                local_performance_storage[0][dec_idx].update(output_decoder_proba[:,1], target_decoder)
                 
                 if batch_idx == (n_batches - 1):
-                    global_res = local_performance_storage[0][dec_idx].compute()
-                    local_performance_storage[0][dec_idx].reset()
+                    global_res = local_performance_storage[0][dec_idx].compute()                    
+                    local_performance_storage[0][dec_idx].reset()  # no real need as initialization of metrics collections takes place before each epoch (2)
+                    accuracy_epoch[0][dec_idx] = global_res['accuracy']
                     confmat = global_res['confusion matrix']
                     tp_epoch, fp_epoch, fn_epoch, tn_epoch = unravel_confusion_matrix(confmat, tp_epoch, fp_epoch, \
-                                                                                      fn_epoch, tn_epoch, 0, dec_idx)                  
+                                                                                      fn_epoch, tn_epoch, 0, dec_idx)           
                 
             for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
                                                                shuffle_mode=self.shuffle_mode,
@@ -172,22 +166,21 @@ class MultiModN(nn.Module):
                 # Skip encoder if data contains nan value
                 if any(data_encoder.isnan().flatten()):
                     continue
-                n_samples_epoch[enc_idx + 1] += batch_size
                 state = encoder(state, data_encoder)
                 state_change[enc_idx] = torch.mean((state - old_state) ** 2)
                 for dec_idx, decoder in enumerate(self.decoders):
                     target_decoder = target[:, dec_idx]
                     output_decoder = decoder(state)
-                    output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim =1).reshape(-1,1))
+                    output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim=1).reshape(-1,1))
                     _, prediction = torch.max(output_decoder, dim=1)
                     err_loss[enc_idx + 1][dec_idx] = criterion(output_decoder,
                                                                target_decoder)
-                    n_correct_epoch[enc_idx + 1][dec_idx] += sum(
-                        prediction == target_decoder)
-                    local_performance_storage[enc_idx + 1][dec_idx].forward(output_decoder_proba[:,1], target_decoder)
+                    local_performance_storage[enc_idx + 1][dec_idx].update(output_decoder_proba[:,1], target_decoder)
                     if batch_idx == (n_batches - 1):
                         global_res = local_performance_storage[enc_idx + 1][dec_idx].compute()
-                        local_performance_storage[enc_idx + 1][dec_idx].reset()
+                        if enc_idx != (len(self.encoders) - 1):
+                            local_performance_storage[enc_idx + 1][dec_idx].reset() # -/(2)/-
+                        accuracy_epoch[enc_idx + 1][dec_idx] = global_res['accuracy']
                         confmat = global_res['confusion matrix']
                         tp_epoch, fp_epoch, fn_epoch, tn_epoch = unravel_confusion_matrix(confmat, tp_epoch, fp_epoch, fn_epoch, \
                                                                                           tn_epoch, enc_idx + 1, dec_idx)
@@ -217,9 +210,7 @@ class MultiModN(nn.Module):
 
         err_loss_epoch /= n_batches
         state_change_epoch /= n_batches
-        accuracy_epoch = n_correct_epoch / n_samples_epoch
-        last_enc_idx = len(self.encoders)
-
+        accuracy_epoch = accuracy_epoch.detach().cpu().numpy()
         # Compute metrics for the current epoch
         # Use np.where to avoid NaNs, set the whole metric to zero
         # in case of the equality of denominator to zero
@@ -227,7 +218,6 @@ class MultiModN(nn.Module):
 
         #Note, that here we compute metrics for all encoders and decoders, \
         # and at the history file select the last encoder for the final metric
-
         sensitivity_denominator = tp_epoch + fn_epoch
         sensitivity_epoch = torch.where(sensitivity_denominator == 0, 0,
                                      tp_epoch / sensitivity_denominator).detach().cpu().numpy()
@@ -245,9 +235,14 @@ class MultiModN(nn.Module):
             history.sensitivity['train'].append(sensitivity_epoch)
             history.specificity['train'].append(specificity_epoch)
             history.balanced_accuracy['train'].append(balanced_accuracy_epoch)
-        if last_epoch: 
-            return self.test(train_loader, criterion, history = None)       
-
+        # Output the results for each decoder with the state vector after the last encoder as input   
+        results = [[]] * len(self.decoders)   
+        last_enc_idx = len(self.encoders)
+        for dec_idx in range(len(self.decoders)):
+            sngl_decoder_dict = local_performance_storage[last_enc_idx][dec_idx].compute()     
+            local_performance_storage[last_enc_idx][dec_idx].reset() # -/(2)/-
+            results[dec_idx] = get_results(sngl_decoder_dict)
+        return results
 
     def test(
             self,
@@ -263,12 +258,11 @@ class MultiModN(nn.Module):
             logger = print
         self.eval()
 
-        n_batches = len(test_loader)
-        n_samples_prediction = np.ones((len(self.encoders) + 1, 1))
+        n_batches = len(test_loader)       
 
         err_loss_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-        n_correct_prediction = np.zeros((len(self.encoders) + 1, len(self.decoders)))
-
+        
+        accuracy_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
         tp_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
         tn_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
         fp_prediction = torch.zeros((len(self.encoders) + 1, len(self.decoders))).to(self.device)
@@ -280,8 +274,7 @@ class MultiModN(nn.Module):
             for batch_idx, batch in enumerate(test_loader):
                 data, target, encoder_sequence = (list(batch) + [None])[:3]
 
-                batch_size = target.shape[0]
-                n_samples_prediction[0] += batch_size
+                batch_size = target.shape[0]               
 
                 err_loss = torch.zeros((len(self.encoders) + 1, len(self.decoders)))
 
@@ -299,15 +292,14 @@ class MultiModN(nn.Module):
                     _, prediction = torch.max(output_decoder, dim=1)                    
                         
                     err_loss[0][dec_idx] = criterion(output_decoder, target_decoder)
-                    n_correct_prediction[0][dec_idx] += sum(
-                        prediction == target_decoder).float()
                     
-                    local_performance_storage[0][dec_idx].forward(output_decoder_proba[:,1], target_decoder)
+                    local_performance_storage[0][dec_idx].update(output_decoder_proba[:,1], target_decoder)
                     
                     if batch_idx == (n_batches - 1):
-                        global_res = local_performance_storage[0][dec_idx].compute()
+                        global_res = local_performance_storage[0][dec_idx].compute()                        
+                        local_performance_storage[0][dec_idx].reset() # -/(2)/-
                         confmat = global_res['confusion matrix']
-                        local_performance_storage[0][dec_idx].reset()
+                        accuracy_prediction[0][dec_idx] = global_res['accuracy']
                         tp_prediction, fp_prediction, fn_prediction, tn_prediction = unravel_confusion_matrix(confmat, tp_prediction, fp_prediction, \
                                                                                       fn_prediction, tn_prediction, 0, dec_idx)      
                 for data_idx, enc_idx in self.get_encoder_iterable(encoder_sequence,
@@ -320,8 +312,6 @@ class MultiModN(nn.Module):
                     if any(data_encoder.isnan().flatten()):
                         continue
 
-                    n_samples_prediction[enc_idx + 1] += batch_size
-
                     state = encoder(state, data_encoder)
 
                     for dec_idx, decoder in enumerate(self.decoders):
@@ -330,21 +320,20 @@ class MultiModN(nn.Module):
                         output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim =1).reshape(-1,1))
                         _, prediction = torch.max(output_decoder, dim=1)
                         err_loss[enc_idx + 1][dec_idx] = criterion(output_decoder,
-                                                                   target_decoder)
-                        n_correct_prediction[enc_idx + 1][dec_idx] += sum(
-                            prediction == target_decoder)
-                        local_performance_storage[enc_idx + 1][dec_idx].forward(output_decoder_proba[:,1], target_decoder)                      
+                                                                   target_decoder)                        
+                        local_performance_storage[enc_idx + 1][dec_idx].update(output_decoder_proba[:,1], target_decoder)                 
                         if batch_idx == (n_batches - 1):
                             global_res = local_performance_storage[enc_idx + 1][dec_idx].compute()
                             if enc_idx != (len(self.encoders) - 1):
-                                local_performance_storage[enc_idx + 1][dec_idx].reset()
+                                local_performance_storage[enc_idx + 1][dec_idx].reset() # -/(2)/-
                             confmat = global_res['confusion matrix']
+                            accuracy_prediction[enc_idx + 1
+                                               ][dec_idx] = global_res['accuracy']
                             tp_prediction, fp_prediction, fn_prediction, tn_prediction = unravel_confusion_matrix(confmat, tp_prediction, fp_prediction, fn_prediction, tn_prediction, enc_idx + 1, dec_idx)   
                 err_loss_prediction += err_loss.detach().numpy()
 
         err_loss_prediction /= n_batches
-        accuracy_prediction = n_correct_prediction / n_samples_prediction
-
+        accuracy_prediction = accuracy_prediction.detach().cpu().numpy()        
         sensitivity_denominator = tp_prediction + fn_prediction
         sensitivity_prediction = torch.where(sensitivity_denominator == 0, 0,
                                           tp_prediction / sensitivity_denominator).detach().cpu().numpy()
@@ -391,7 +380,7 @@ class MultiModN(nn.Module):
         last_enc_idx = len(self.encoders)
         for dec_idx in range(len(self.decoders)):
             sngl_decoder_dict = local_performance_storage[last_enc_idx][dec_idx].compute()     
-            local_performance_storage[last_enc_idx][dec_idx].reset()
+            local_performance_storage[last_enc_idx][dec_idx].reset() # -/(2)/-
             results[dec_idx] = get_results(sngl_decoder_dict)
         return results     
 
