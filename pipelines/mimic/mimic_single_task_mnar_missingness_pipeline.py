@@ -181,7 +181,7 @@ def main():
             # ModN training            
             best_auc_bac_sum = 0
             for epoch in trange(epochs):            
-                train_buff_modn = model_modn.train_epoch(train_loader, optimizer, criterion, history)
+                model_modn.train_epoch(train_loader, optimizer, criterion, history)
                 val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')
                 auc_bac_sum =  val_buff_modn[0][1] + (val_buff_modn[0][3] + val_buff_modn[0][4]) / 2
                 # Save the best model based on the sum of validation auroc and bac
@@ -291,7 +291,7 @@ def main():
             # HAIM training
             best_auc_bac_sum = 0
             for epoch in trange(epochs):  
-                train_buff_haim = model_haim.train_epoch(train_loader, optimizer, criterion, )  
+                model_haim.train_epoch(train_loader, optimizer, criterion, )  
                 val_buff_haim = model_haim.test(val_loader, criterion)
                 auc_bac_sum = val_buff_haim[1] + (val_buff_haim[3] + val_buff_haim[4]) / 2
                 if auc_bac_sum > best_auc_bac_sum:                                        

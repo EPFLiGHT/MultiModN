@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from typing import Callable, Optional, Tuple, Union
-from torchmetrics import MetricCollection, ConfusionMatrix, F1Score, ROC, PrecisionRecallCurve, Accuracy, AUROC
-from multimodn.multimodn import get_metrics_collection, store_performance, unravel_confusion_matrix, get_results
+
+from multimodn.multimodn import store_performance, get_results
 
 class HAIMDecoder(nn.Module):    
     def __init__(
@@ -52,46 +52,39 @@ class HAIM(nn.Module):
             self,
             train_loader: DataLoader,
             optimizer: Optimizer,
-            criterion: Union[nn.Module, Callable],           
-    ) -> None:
-        n_batches = len(train_loader)
+            criterion: Union[nn.Module, Callable],    
+            all_per_batch: bool = False,         
+    ) -> None:        
         self.train()        
-        local_performance_storage = store_performance(1, 1, self.device)
-        for batch_idx, batch in enumerate(train_loader):
-            data, target = list(batch)[:2]     
-            batch_size = target.shape[0]
+        local_performance_storage = store_performance(1, 1, self.device, all_per_batch = all_per_batch)
+        for batch in train_loader:
+            data, target = list(batch)[:2]                 
             err_loss = 0            
             target = target.type(torch.LongTensor)
             target = target.to(self.device)
             data = data.to(self.device)
-            target = target[:,0]
- 
-            optimizer.zero_grad() 
-
+            target = target[:,0] 
+            optimizer.zero_grad()
             output_decoder = self.decoder(data)
             err_loss = criterion(output_decoder, target)
             err_loss.backward()
-            optimizer.step()        
-            
+            optimizer.step()              
             output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim=1).reshape(-1,1))
-            local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)
-            if batch_idx == (n_batches - 1):
-                haim_decoder_dict = local_performance_storage[0][0].compute()                      
-                local_performance_storage[0][0].reset() # -/(2)/-
-                results = get_results(haim_decoder_dict)
+            local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)    
+        haim_decoder_dict = local_performance_storage[0][0].compute()
+        results = get_results(haim_decoder_dict)
         return results
   
         
     def test(
             self,
-            test_loader: DataLoader,
-            criterion: Union[nn.Module, Callable],
+            test_loader: DataLoader,    
+            all_per_batch: bool = False,        
     ):
         self.eval()
-        local_performance_storage = store_performance(1, 1, self.device)
-        n_batches = len(test_loader)
+        local_performance_storage = store_performance(1, 1, self.device,  all_per_batch = all_per_batch)
         with torch.no_grad():
-            for batch_ind, batch in enumerate(test_loader):
+            for batch in test_loader:
                 data, target = (list(batch))[:2]
                 target = target.type(torch.LongTensor)
                 target = target.to(self.device)
@@ -99,11 +92,10 @@ class HAIM(nn.Module):
                 target = target[:,0]      
                 output_decoder = self.decoder(data)
                 output_decoder_proba = torch.div(output_decoder, torch.sum(output_decoder, dim=1).reshape(-1,1))
-                local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)
-                if batch_ind == (n_batches - 1):
-                    haim_decoder_dict = local_performance_storage[0][0].compute()                      
-                    local_performance_storage[0][0].reset() # -/(2)/-
-                    results = get_results(haim_decoder_dict)
+                local_performance_storage[0][0].forward(output_decoder_proba[:,1], target)                
+            haim_decoder_dict = local_performance_storage[0][0].compute()                      
+            local_performance_storage[0][0].reset() # -/(2)/-
+            results = get_results(haim_decoder_dict)
         return results
     
     

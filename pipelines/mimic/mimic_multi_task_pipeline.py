@@ -134,7 +134,7 @@ def main():
         # ModN training
         best_auc_bac_sum = 0
         for epoch in trange(epochs):    
-            train_buff_modn = model_modn.train_epoch(train_loader, optimizer, criterion, history)
+            model_modn.train_epoch(train_loader, optimizer, criterion, history)
             val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')            
             auc_val = 0
             bac_val = 0

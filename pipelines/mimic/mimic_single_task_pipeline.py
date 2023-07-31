@@ -140,7 +140,7 @@ def main():
             # ModN training
             best_auc_bac_sum = 0
             for epoch in trange(epochs):            
-                train_buff_modn = model_modn.train_epoch(train_loader, optimizer, criterion, history)
+                model_modn.train_epoch(train_loader, optimizer, criterion, history)
                 val_buff_modn = model_modn.test(val_loader, criterion, history, tag='val')
                 # Save the best model based on the sum of validation auroc and bac
                 auc_bac_sum =  val_buff_modn[0][1] + (val_buff_modn[0][3] + val_buff_modn[0][4]) / 2
